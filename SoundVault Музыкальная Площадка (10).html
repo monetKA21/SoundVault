@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SoundVault — Private Audio Streaming</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        vault: {
+                            bg: '#0F0F11',
+                            card: '#18181C',
+                            hover: '#222228',
+                            border: '#2A2A32',
+                            accent: '#E5A93C',
+                            accentHover: '#D4982B',
+                            muted: '#8E8E9A'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0F0F11; }
+        ::-webkit-scrollbar-thumb { background: #2A2A32; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #E5A93C; }
+
+        .glass {
+            background: rgba(24, 24, 28, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .glass-card {
+            background: rgba(34, 34, 40, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .glass-card:hover {
+            background: rgba(42, 42, 50, 0.85);
+            border-color: rgba(229, 169, 60, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .tab-fade { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        #bgLayer video, #bgLayer img {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover;
+            z-index: -10;
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
+        /* Animated Equalizer Bars */
+        .eq-bar {
+            display: inline-block;
+            width: 3px;
+            background-color: #E5A93C;
+            border-radius: 2px;
+            animation: bounce 1s infinite ease-in-out alternate;
+        }
+        .eq-bar:nth-child(1) { height: 12px; animation-delay: 0.1s; }
+        .eq-bar:nth-child(2) { height: 18px; animation-delay: 0.3s; }
+        .eq-bar:nth-child(3) { height: 8px; animation-delay: 0.2s; }
+        .eq-bar:nth-child(4) { height: 15px; animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0% { height: 4px; }
+            100% { height: 18px; }
+        }
+    </style>
+</head>
+<body class="h-full bg-vault-bg text-zinc-100 font-sans antialiased overflow-hidden select-none flex flex-col">
+
+    <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+    <div id="bgLayer" class="fixed inset-0 pointer-events-none z-[-10]"></div>
+    <audio id="mainAudio"></audio>
+
+    <!-- AUTHENTICATION REGISTRATION MODAL ONLY -->
+    <div id="authModal" class="fixed inset-0 z-50 glass bg-black/90 flex items-center justify-center p-4">
+        <div class="bg-vault-card border border-vault-border w-full max-w-md rounded-3xl p-8 shadow-2xl space-y-6 tab-fade">
+            <div class="text-center space-y-2">
+                <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-vault-accent to-amber-700 flex items-center justify-center mx-auto shadow-xl shadow-amber-950/40">
+                    <i class="fa-solid fa-vault text-zinc-950 text-2xl"></i>
+                </div>
+                <h2 class="text-2xl font-extrabold tracking-tight text-white">SoundVault</h2>
+                <p class="text-xs text-vault-muted">Создайте аккаунт для входа в приватную медиатеку</p>
+            </div>
+
+            <div id="authErrorBox" class="hidden p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium"></div>
+
+            <form onsubmit="handleAuthSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Никнейм</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500"><i class="fa-solid fa-user text-xs"></i></span>
+                        <input type="text" id="authUsername" required placeholder="Только латиница (3-12 букв)" class="w-full pl-10 pr-4 py-3 rounded-xl bg-vault-bg border border-vault-border text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-vault-accent">
+                    </div>
+                    <p class="text-[10px] text-vault-muted mt-1">Только латинские буквы (a-z), без цифр и пробелов.</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Пароль</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500"><i class="fa-solid fa-lock text-xs"></i></span>
+                        <input type="password" id="authPassword" required placeholder="••••••••" class="w-full pl-10 pr-4 py-3 rounded-xl bg-vault-bg border border-vault-border text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-vault-accent">
+                    </div>
+                    <p class="text-[10px] text-vault-muted mt-1">Мин. 6 символов, должен содержать буквы и цифры (не 123).</p>
+                </div>
+
+                <button type="submit" id="authSubmitBtn" class="w-full py-3.5 rounded-xl bg-vault-accent hover:bg-vault-accentHover text-zinc-950 font-bold text-sm shadow-lg shadow-vault-accent/20 active:scale-[0.98]">
+                    Зарегистрироваться / Войти
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- LOGOUT CONFIRMATION MODAL -->
+    <div id="logoutConfirmModal" class="fixed inset-0 z-50 glass bg-black/85 flex items-center justify-center p-4 hidden">
+        <div class="bg-vault-card border border-vault-border w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 tab-fade">
+            <div class="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto text-xl">
+                <i class="fa-solid fa-right-from-bracket"></i>
+            </div>
+            <div>
+                <h3 class="text-base font-bold text-white">Вы точно хотите выйти из аккаунта?</h3>
+                <div class="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                    Внимание: Вы вернетесь на экран регистрации!
+                </div>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button onclick="closeLogoutModal()" class="flex-1 py-2.5 rounded-xl glass text-vault-muted text-xs font-semibold hover:text-white">Отмена</button>
+                <button onclick="confirmLogout()" class="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold shadow-lg shadow-rose-500/20">Выйти</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP LAYOUT -->
+    <div id="appContainer" class="hidden h-full w-full flex flex-col md:flex-row relative">
+        <aside class="hidden md:flex flex-col w-64 h-full glass border-r border-vault-border z-30 shrink-0">
+            <div class="p-6 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-vault-accent to-amber-700 flex items-center justify-center shadow-lg shadow-amber-950/40">
+                    <i class="fa-solid fa-vault text-zinc-950 text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base tracking-tight text-white">SoundVault</h1>
+                    <p class="text-[10px] text-vault-muted font-medium">Личная фонотека</p>
+                </div>
+            </div>
+
+            <nav class="px-4 py-2 space-y-1.5 flex-1">
+                <button onclick="switchTab('search')" id="nav-search" class="nav-btn w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-semibold bg-vault-accent/10 text-vault-accent border border-vault-accent/20">
+                    <i class="fa-solid fa-cloud-arrow-up w-5 text-center"></i>
+                    <span>Загрузка & Поиск</span>
+                </button>
+                <button onclick="switchTab('favorites')" id="nav-favorites" class="nav-btn w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium text-vault-muted hover:text-white hover:bg-vault-hover">
+                    <i class="fa-solid fa-heart w-5 text-center"></i>
+                    <span>Избранное</span>
+                    <span id="favCountBadge" class="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-vault-hover text-vault-muted font-mono">0</span>
+                </button>
+                <button onclick="switchTab('playlist')" id="nav-playlist" class="nav-btn w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium text-vault-muted hover:text-white hover:bg-vault-hover">
+                    <i class="fa-solid fa-list-ul w-5 text-center"></i>
+                    <span>Плейлист</span>
+                    <span id="playlistCountBadge" class="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-vault-hover text-vault-muted font-mono">0</span>
+                </button>
+                <button onclick="switchTab('leaderboard')" id="nav-leaderboard" class="nav-btn w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium text-vault-muted hover:text-white hover:bg-vault-hover">
+                    <i class="fa-solid fa-trophy w-5 text-center"></i>
+                    <span>Слушатели</span>
+                </button>
+            </nav>
+
+            <div class="p-3.5 m-4 rounded-2xl glass border border-vault-border flex items-center gap-3 cursor-pointer hover:border-zinc-700 active:scale-95" onclick="openProfileModal()">
+                <div class="relative w-10 h-10 rounded-full overflow-hidden shrink-0 ring-2 ring-vault-accent/50 bg-vault-hover flex items-center justify-center font-bold text-vault-accent">
+                    <img id="sidebarAvatarImg" src="" class="w-full h-full object-cover hidden">
+                    <video id="sidebarAvatarVid" class="w-full h-full object-cover hidden" autoplay loop muted playsinline></video>
+                    <span id="sidebarAvatarInitial">U</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h4 id="sidebarUsername" class="text-sm font-bold text-white truncate">User</h4>
+                    <p id="sidebarListenTime" class="text-[10px] text-vault-muted truncate">0 мин. прослушано</p>
+                </div>
+                <i class="fa-solid fa-sliders text-vault-muted text-xs"></i>
+            </div>
+        </aside>
+
+        <!-- MOBILE NAVIGATION -->
+        <nav class="md:hidden fixed bottom-0 left-0 right-0 h-16 glass border-t border-vault-border z-40 flex items-center justify-around px-2">
+            <button onclick="switchTab('search')" id="mob-nav-search" class="mob-nav-btn flex flex-col items-center justify-center flex-1 py-1 text-vault-accent">
+                <i class="fa-solid fa-cloud-arrow-up text-base mb-0.5"></i>
+                <span class="text-[10px] font-semibold">Загрузка</span>
+            </button>
+            <button onclick="switchTab('favorites')" id="mob-nav-favorites" class="mob-nav-btn flex flex-col items-center justify-center flex-1 py-1 text-vault-muted">
+                <i class="fa-solid fa-heart text-base mb-0.5"></i>
+                <span class="text-[10px] font-semibold">Избранное</span>
+            </button>
+            <button onclick="switchTab('playlist')" id="mob-nav-playlist" class="mob-nav-btn flex flex-col items-center justify-center flex-1 py-1 text-vault-muted">
+                <i class="fa-solid fa-list-ul text-base mb-0.5"></i>
+                <span class="text-[10px] font-semibold">Плейлист</span>
+            </button>
+            <button onclick="switchTab('leaderboard')" id="mob-nav-leaderboard" class="mob-nav-btn flex flex-col items-center justify-center flex-1 py-1 text-vault-muted">
+                <i class="fa-solid fa-trophy text-base mb-0.5"></i>
+                <span class="text-[10px] font-semibold">Топ</span>
+            </button>
+            <button onclick="openProfileModal()" class="flex flex-col items-center justify-center flex-1 py-1 text-vault-muted">
+                <i class="fa-solid fa-user-gear text-base mb-0.5"></i>
+                <span class="text-[10px] font-semibold">Профиль</span>
+            </button>
+        </nav>
+
+        <main class="flex-1 h-full overflow-y-auto pb-44 md:pb-32 relative flex flex-col">
+            <header class="sticky top-0 z-20 glass border-b border-vault-border px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-3 md:hidden">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-vault-accent to-amber-700 flex items-center justify-center">
+                        <i class="fa-solid fa-vault text-zinc-950 text-sm"></i>
+                    </div>
+                    <span class="font-bold text-sm tracking-tight text-white">SoundVault</span>
+                </div>
+                <div class="hidden md:block">
+                    <h2 id="headerTitle" class="text-xl font-bold text-white tracking-tight">Загрузка & Поиск Треков</h2>
+                    <p id="headerSubtitle" class="text-xs text-vault-muted">Ваша изолированная музыкальная база</p>
+                </div>
+                <div class="flex items-center gap-2.5 ml-auto">
+                    <button onclick="openUploadModal()" class="px-4 py-2 rounded-xl bg-vault-accent hover:bg-vault-accentHover text-zinc-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-vault-accent/10 active:scale-95">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>Добавить трек</span>
+                    </button>
+                    <button onclick="openProfileModal()" class="flex items-center gap-2 px-3 py-2 rounded-xl bg-vault-hover hover:bg-vault-border border border-vault-border text-xs font-medium text-zinc-200 active:scale-95">
+                        <i class="fa-solid fa-palette text-vault-accent"></i>
+                        <span class="hidden md:inline">Оформление</span>
+                    </button>
+                    <button onclick="openLogoutModal()" class="p-2 rounded-xl bg-vault-hover hover:bg-rose-950/40 text-vault-muted hover:text-rose-400 border border-vault-border text-xs" title="Выйти">
+                        <i class="fa-solid fa-right-from-bracket"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- TAB 1: SEARCH & UPLOAD -->
+            <div id="tab-search" class="tab-content flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full tab-fade">
+                <div class="mb-6">
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-zinc-500">
+                            <i class="fa-solid fa-magnifying-glass text-sm"></i>
+                        </span>
+                        <input type="text" id="trackSearchInput" oninput="filterTracks()" placeholder="Поиск по вашим загруженным трекам..." 
+                            class="w-full pl-11 pr-4 py-3.5 rounded-2xl glass border border-vault-border text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-vault-accent">
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-sm font-bold uppercase tracking-wider text-vault-muted">Ваши треки (<span id="trackCountBadge">0</span>)</h4>
+                </div>
+
+                <div id="tracksGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5"></div>
+
+                <div id="emptyTracks" class="hidden flex-col items-center justify-center py-20 text-center">
+                    <div class="w-16 h-16 rounded-2xl bg-vault-card border border-vault-border flex items-center justify-center text-vault-muted text-2xl mb-3">
+                        <i class="fa-solid fa-music"></i>
+                    </div>
+                    <h4 class="text-sm font-semibold text-zinc-300 mb-1">Медиатека пуста</h4>
+                    <p class="text-xs text-vault-muted mb-4">Загружайте MP3 файлы или вставляйте прямые ссылки на аудио</p>
+                    <button onclick="openUploadModal()" class="px-4 py-2 rounded-xl bg-vault-accent text-zinc-950 font-bold text-xs">Загрузить трек</button>
+                </div>
+            </div>
+
+            <!-- TAB 2: FAVORITES -->
+            <div id="tab-favorites" class="tab-content hidden flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full tab-fade">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h3 class="text-xl font-bold text-white">Избранное</h3>
+                        <p class="text-xs text-vault-muted">Понравившиеся вам композиции</p>
+                    </div>
+                    <button onclick="playAllFavorites()" class="px-4 py-2 rounded-xl bg-vault-accent hover:bg-vault-accentHover text-zinc-950 text-xs font-bold flex items-center gap-2">
+                        <i class="fa-solid fa-play"></i>
+                        <span>Воспроизвести всё</span>
+                    </button>
+                </div>
+
+                <div id="favoritesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5"></div>
+
+                <div id="emptyFavorites" class="hidden flex-col items-center justify-center py-20 text-center">
+                    <i class="fa-regular fa-heart text-4xl text-vault-muted mb-3"></i>
+                    <p class="text-sm font-medium text-vault-muted mb-1">Список избранного пуст</p>
+                </div>
+            </div>
+
+            <!-- TAB 3: PLAYLIST QUEUE -->
+            <div id="tab-playlist" class="tab-content hidden flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full tab-fade">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h3 class="text-xl font-bold text-white">Очередь воспроизведения</h3>
+                        <p class="text-xs text-vault-muted">Текущий плейлист</p>
+                    </div>
+                    <button onclick="clearPlaylist()" class="px-3.5 py-2 rounded-xl glass text-vault-muted hover:text-rose-400 text-xs font-semibold">Очистить</button>
+                </div>
+
+                <div id="playlistList" class="space-y-2.5"></div>
+
+                <div id="emptyPlaylist" class="hidden flex-col items-center justify-center py-20 text-center">
+                    <i class="fa-solid fa-list-ul text-4xl text-vault-muted mb-3"></i>
+                    <p class="text-sm font-medium text-vault-muted">Плейлист пуст</p>
+                </div>
+            </div>
+
+            <!-- TAB 4: LISTENERS LEADERBOARD -->
+            <div id="tab-leaderboard" class="tab-content hidden flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full tab-fade">
+                <div class="mb-6">
+                    <h3 class="text-xl font-bold text-white">Таблица Слушателей</h3>
+                    <p class="text-xs text-vault-muted">Рейтинг всех зарегистрированных участников по общему времени прослушивания</p>
+                </div>
+
+                <div id="leaderboardList" class="space-y-3"></div>
+            </div>
+        </main>
+
+        <!-- STICKY PLAYER BAR -->
+        <div class="fixed bottom-16 md:bottom-0 left-0 right-0 z-30 glass border-t border-vault-border px-4 py-3 md:px-6 md:py-4 shadow-2xl">
+            <div class="flex items-center gap-3 mb-2 max-w-7xl mx-auto">
+                <span id="currentTimeLabel" class="text-[11px] text-vault-muted font-mono w-10 text-right">0:00</span>
+                <div class="flex-1 relative group cursor-pointer py-1" onclick="seekAudio(event)">
+                    <div class="h-1.5 w-full bg-vault-border rounded-full overflow-hidden">
+                        <div id="progressBarFill" class="h-full bg-vault-accent w-0"></div>
+                    </div>
+                </div>
+                <span id="durationLabel" class="text-[11px] text-vault-muted font-mono w-10">0:00</span>
+            </div>
+
+            <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3 min-w-0 w-1/3">
+                    <img id="playerCover" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='100%25' height='100%25' fill='%2318181C'/%3E%3C/svg%3E" class="w-12 h-12 rounded-xl object-cover shrink-0 ring-1 ring-vault-border shadow">
+                    <div class="min-w-0">
+                        <h4 id="playerTitle" class="text-sm font-semibold text-white truncate">Трек не выбран</h4>
+                        <p id="playerArtist" class="text-xs text-vault-muted truncate">Ожидание воспроизведения</p>
+                    </div>
+                    <button id="playerLikeBtn" onclick="toggleCurrentFavorite()" class="text-vault-muted hover:text-vault-accent transition-colors ml-2 hidden md:block">
+                        <i class="fa-regular fa-heart text-lg"></i>
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-3 md:gap-5">
+                    <button onclick="toggleRepeat()" id="btnRepeat" class="text-vault-muted hover:text-white text-xs hidden sm:block" title="Повтор">
+                        <i class="fa-solid fa-repeat"></i>
+                    </button>
+                    <button onclick="prevTrack()" class="text-zinc-300 hover:text-white text-base md:text-lg">
+                        <i class="fa-solid fa-backward-step"></i>
+                    </button>
+                    <button onclick="togglePlayPause()" class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-vault-accent hover:bg-vault-accentHover text-zinc-950 flex items-center justify-center text-lg shadow-lg shadow-vault-accent/20 active:scale-95">
+                        <i id="playPauseIcon" class="fa-solid fa-play ml-0.5"></i>
+                    </button>
+                    <button onclick="nextTrack()" class="text-zinc-300 hover:text-white text-base md:text-lg">
+                        <i class="fa-solid fa-forward-step"></i>
+                    </button>
+                    <button onclick="toggleShuffle()" id="btnShuffle" class="text-vault-muted hover:text-white text-xs hidden sm:block" title="Перемешать">
+                        <i class="fa-solid fa-shuffle"></i>
+                    </button>
+                </div>
+
+                <div class="hidden md:flex items-center justify-end gap-2.5 w-1/3">
+                    <button onclick="toggleMute()" id="muteBtn" class="text-vault-muted hover:text-white text-xs p-1">
+                        <i class="fa-solid fa-volume-high"></i>
+                    </button>
+                    <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.8" oninput="changeVolume(this.value)" 
+                        class="w-24 h-1 bg-vault-border rounded-lg appearance-none cursor-pointer accent-vault-accent">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPLOAD TRACK MODAL (URL OR FILE) -->
+    <div id="uploadModal" class="fixed inset-0 z-50 glass bg-black/80 flex items-center justify-center p-4 hidden">
+        <div class="bg-vault-card border border-vault-border w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-5 tab-fade">
+            <div class="flex items-center justify-between border-b border-vault-border pb-3">
+                <h3 class="text-lg font-bold text-white">Загрузка нового трека</h3>
+                <button onclick="closeUploadModal()" class="text-vault-muted hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Upload Type Toggle -->
+            <div class="flex p-1 bg-vault-bg rounded-xl border border-vault-border">
+                <button type="button" id="uploadTabFile" onclick="setUploadSourceType('file')" class="flex-1 py-2 rounded-lg text-xs font-semibold bg-vault-accent text-zinc-950">Файл с устройства</button>
+                <button type="button" id="uploadTabUrl" onclick="setUploadSourceType('url')" class="flex-1 py-2 rounded-lg text-xs font-semibold text-vault-muted hover:text-white">Ссылка на аудио (URL)</button>
+            </div>
+
+            <form onsubmit="handleUploadSubmit(event)" class="space-y-4">
+                <!-- Source Input File -->
+                <div id="uploadSourceFileInput">
+                    <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Аудиофайл (MP3 / WAV)</label>
+                    <input type="file" id="uploadAudioFile" accept="audio/*" class="w-full text-xs text-vault-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-vault-hover file:text-zinc-200 hover:file:bg-vault-border cursor-pointer">
+                </div>
+
+                <!-- Source Input URL -->
+                <div id="uploadSourceUrlInput" class="hidden">
+                    <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Прямая ссылка на трек (MP3 / WAV / OGG)</label>
+                    <input type="url" id="uploadAudioUrl" placeholder="https://example.com/song.mp3" class="w-full px-3.5 py-2.5 rounded-xl bg-vault-bg border border-vault-border text-xs text-zinc-100 focus:outline-none focus:border-vault-accent">
+                    <p class="text-[10px] text-vault-muted mt-1">Поддерживаются прямые прямые ссылки на аудиозаписи.</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Название *</label>
+                        <input type="text" id="uploadTitle" required placeholder="Название песни" class="w-full px-3.5 py-2.5 rounded-xl bg-vault-bg border border-vault-border text-xs text-zinc-100 focus:outline-none focus:border-vault-accent">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Исполнитель *</label>
+                        <input type="text" id="uploadArtist" required placeholder="Имя артиста" class="w-full px-3.5 py-2.5 rounded-xl bg-vault-bg border border-vault-border text-xs text-zinc-100 focus:outline-none focus:border-vault-accent">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-vault-muted mb-1.5 uppercase tracking-wider">Обложка альбома из галереи</label>
+                    <input type="file" id="uploadCoverFile" accept="image/*" class="w-full text-xs text-vault-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-vault-hover file:text-zinc-200 hover:file:bg-vault-border cursor-pointer">
+                </div>
+
+                <div class="pt-3 border-t border-vault-border flex justify-end gap-3">
+                    <button type="button" onclick="closeUploadModal()" class="px-4 py-2 rounded-xl glass text-vault-muted text-xs font-semibold">Отмена</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-vault-accent hover:bg-vault-accentHover text-zinc-950 font-bold text-xs">Сохранить трек</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- PROFILE CUSTOMIZATION & PLAYBACK BEHAVIOR MODAL -->
+    <div id="profileModal" class="fixed inset-0 z-50 glass bg-black/80 flex items-center justify-center p-4 hidden">
+        <div class="bg-vault-card border border-vault-border w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto tab-fade">
+            <div class="flex items-center justify-between border-b border-vault-border pb-3">
+                <h3 class="text-lg font-bold text-white">Настройки Профиля</h3>
+                <button onclick="closeProfileModal()" class="text-vault-muted hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Global Playback Mode Selector -->
+                <div class="p-4 rounded-2xl glass border border-vault-border space-y-2">
+                    <h4 class="text-xs font-bold text-vault-accent uppercase tracking-wider">Поведение Плеера по Умолчанию</h4>
+                    <p class="text-[11px] text-vault-muted">Что делать при завершении трека:</p>
+                    <select id="profilePlaybackMode" onchange="updatePlaybackMode(this.value)" class="w-full px-3.5 py-2.5 rounded-xl bg-vault-bg border border-vault-border text-xs text-zinc-100 focus:outline-none focus:border-vault-accent">
+                        <option value="next">Переходить на следующий трек (Авто-очередь)</option>
+                        <option value="repeat">Повторять текущий трек по кругу (Repeat Single)</option>
+                    </select>
+                </div>
+
+                <!-- Anonymous Toggle -->
+                <div class="flex items-center justify-between p-4 rounded-2xl glass border border-vault-border">
+                    <div>
+                        <h4 class="text-sm font-bold text-white">Анонимный режим</h4>
+                        <p class="text-xs text-vault-muted">Скрыть свой аккаунт из таблицы слушателей</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="anonToggle" onchange="toggleAnonymousMode(this.checked)" class="sr-only peer">
+                        <div class="w-11 h-6 bg-vault-hover peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-vault-accent"></div>
+                    </label>
+                </div>
+
+                <!-- Custom Avatar -->
+                <div class="p-4 rounded-2xl glass border border-vault-border space-y-3">
+                    <h4 class="text-xs font-bold text-vault-accent uppercase tracking-wider">Аватарка из Галереи</h4>
+                    <p class="text-[11px] text-vault-muted">Фото или анимированное видео до 10 секунд (цикл)</p>
+                    <input type="file" id="profileAvatarInput" accept="image/*,video/*" class="w-full text-xs text-vault-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-vault-hover file:text-zinc-200 hover:file:bg-vault-border cursor-pointer">
+                </div>
+
+                <!-- Custom Background -->
+                <div class="p-4 rounded-2xl glass border border-vault-border space-y-3">
+                    <h4 class="text-xs font-bold text-vault-accent uppercase tracking-wider">Фон Площадки из Галереи</h4>
+                    <p class="text-[11px] text-vault-muted">Фоновое изображение или закольцованное видео</p>
+                    <input type="file" id="profileBgInput" accept="image/*,video/*" class="w-full text-xs text-vault-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-vault-hover file:text-zinc-200 hover:file:bg-vault-border cursor-pointer">
+                    <button onclick="resetBackground()" class="mt-1 text-[11px] text-rose-400 hover:underline">Сбросить фон на стандартный</button>
+                </div>
+            </div>
+
+            <div class="pt-3 border-t border-vault-border flex justify-end gap-3">
+                <button onclick="closeProfileModal()" class="px-4 py-2 rounded-xl glass text-vault-muted text-xs font-semibold">Закрыть</button>
+                <button onclick="saveProfileCustomization()" class="px-5 py-2 rounded-xl bg-vault-accent hover:bg-vault-accentHover text-zinc-950 font-bold text-xs">Применить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STEAM-STYLE PROFILE MODAL -->
+    <div id="steamModal" class="fixed inset-0 z-50 glass bg-black/85 flex items-center justify-center p-4 hidden">
+        <div class="bg-vault-card border border-vault-border w-full max-w-md rounded-3xl p-6 shadow-2xl relative overflow-hidden tab-fade">
+            <button onclick="closeSteamModal()" class="absolute top-4 right-4 text-vault-muted hover:text-white text-lg z-10"><i class="fa-solid fa-xmark"></i></button>
+
+            <div class="h-28 bg-gradient-to-r from-amber-950/60 via-vault-hover to-vault-card -mx-6 -mt-6 mb-12 relative border-b border-vault-border">
+                <div class="absolute -bottom-10 left-6 w-20 h-20 rounded-2xl ring-4 ring-vault-card overflow-hidden bg-vault-hover flex items-center justify-center font-bold text-vault-accent text-2xl shadow-xl">
+                    <img id="steamAvatarImg" src="" class="w-full h-full object-cover hidden">
+                    <video id="steamAvatarVid" class="w-full h-full object-cover hidden" autoplay loop muted playsinline></video>
+                    <span id="steamAvatarInitial">U</span>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <h3 id="steamUsername" class="text-xl font-extrabold text-white">Username</h3>
+                    <p class="text-xs text-vault-accent font-mono mt-0.5">SoundVault Listener</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 py-3 border-y border-vault-border">
+                    <div class="bg-vault-bg p-3.5 rounded-2xl border border-vault-border text-center">
+                        <span id="steamTrackCount" class="block text-xl font-extrabold text-vault-accent">0</span>
+                        <span class="text-[10px] font-semibold text-vault-muted uppercase tracking-wider">Треков в базе</span>
+                    </div>
+                    <div class="bg-vault-bg p-3.5 rounded-2xl border border-vault-border text-center">
+                        <span id="steamListenedTime" class="block text-xl font-extrabold text-vault-accent">0 мин</span>
+                        <span class="text-[10px] font-semibold text-vault-muted uppercase tracking-wider">Время в музыке</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APPLICATION ENGINE -->
+    <script>
+        const BANNED_WORDS = ['penis', 'blat', 'fuck', 'bitch', 'shit', 'ass', 'dick', 'pussy', 'whore', 'cunt', 'blyad', 'suka', 'chlen', 'huy', 'pizda', 'ebat', 'пидор', 'хуй', 'сука', 'блять', 'ебать'];
+        const WEAK_PASSWORDS = ['123', '1234', '12345', '123456', 'qwerty', 'password', '111111', '000000', '123321', '654321'];
+
+        let currentUser = null;
+        let myTracks = [];
+        let favoritesMap = new Map();
+        let playlistQueue = [];
+        let currentTrack = null;
+        let isPlaying = false;
+        let isMuted = false;
+        let isRepeat = false;
+        let isShuffle = false;
+        let uploadSourceType = 'file';
+        let db = null;
+        let listeningTimer = null;
+
+        const audioEl = document.getElementById('mainAudio');
+
+        function initIndexedDB() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open("SoundVaultDB_v4", 1);
+                req.onupgradeneeded = (e) => {
+                    db = e.target.result;
+                    if (!db.objectStoreNames.contains("vaultStore")) db.createObjectStore("vaultStore");
+                };
+                req.onsuccess = (e) => { db = e.target.result; resolve(); };
+                req.onerror = (e) => reject(e);
+            });
+        }
+
+        function storeBlob(key, blob) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction("vaultStore", "readwrite");
+                tx.objectStore("vaultStore").put(blob, key);
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e);
+            });
+        }
+
+        function getBlob(key) {
+            return new Promise((resolve) => {
+                const tx = db.transaction("vaultStore", "readonly");
+                const req = tx.objectStore("vaultStore").get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(null);
+            });
+        }
+
+        function deleteBlob(key) {
+            return new Promise((resolve) => {
+                const tx = db.transaction("vaultStore", "readwrite");
+                tx.objectStore("vaultStore").delete(key);
+                tx.oncomplete = () => resolve();
+            });
+        }
+
+        window.onload = async function() {
+            await initIndexedDB();
+            setupAudioEvents();
+            checkSession();
+        };
+
+        function showAuthError(msg) {
+            const box = document.getElementById('authErrorBox');
+            box.innerText = msg;
+            box.classList.remove('hidden');
+        }
+
+        // UNIFIED REGISTRATION & ENTRY FLOW
+        function handleAuthSubmit(e) {
+            e.preventDefault();
+            const usernameInput = document.getElementById('authUsername').value.trim();
+            const passwordInput = document.getElementById('authPassword').value;
+
+            // Strict Validation Rules
+            if (usernameInput.length < 3 || usernameInput.length > 12) {
+                showAuthError('Никнейм должен быть от 3 до 12 символов.');
+                return;
+            }
+            if (!/^[a-zA-Z]+$/.test(usernameInput)) {
+                showAuthError('Никнейм должен состоять ТОЛЬКО из латинских букв (a-z, без цифр и пробелов).');
+                return;
+            }
+
+            const userKey = usernameInput.toLowerCase();
+            for (let word of BANNED_WORDS) {
+                if (userKey.includes(word)) {
+                    showAuthError('Этот никнейм содержит недопустимые выражения.');
+                    return;
+                }
+            }
+
+            if (passwordInput.length < 6) {
+                showAuthError('Пароль должен содержать минимум 6 символов.');
+                return;
+            }
+            if (WEAK_PASSWORDS.includes(passwordInput.toLowerCase())) {
+                showAuthError('Слишком простой пароль! Не используйте 123 или qwerty.');
+                return;
+            }
+            if (!/[a-zA-Z]/.test(passwordInput) || !/[0-9]/.test(passwordInput)) {
+                showAuthError('Пароль должен содержать как буквы, так и цифры.');
+                return;
+            }
+
+            let users = JSON.parse(localStorage.getItem('vault_users_db') || '{}');
+
+            if (!users[userKey]) {
+                // Register User
+                users[userKey] = {
+                    originalName: usernameInput,
+                    password: passwordInput,
+                    listeningSeconds: 0,
+                    isAnonymous: false,
+                    playbackMode: 'next'
+                };
+                localStorage.setItem('vault_users_db', JSON.stringify(users));
+                showToast("Аккаунт успешно создан!");
+            } else {
+                // Check Existing Password
+                if (users[userKey].password !== passwordInput) {
+                    showAuthError('Пользователь существует, но пароль неверный!');
+                    return;
+                }
+            }
+
+            currentUser = { username: users[userKey].originalName || usernameInput, ...users[userKey] };
+            localStorage.setItem('vault_active_session', userKey);
+            document.getElementById('authModal').classList.add('hidden');
+            document.getElementById('appContainer').classList.remove('hidden');
+            loadUserData();
+            showToast(`Добро пожаловать, ${currentUser.username}!`);
+        }
+
+        function checkSession() {
+            const activeKey = localStorage.getItem('vault_active_session');
+            if (activeKey) {
+                let users = JSON.parse(localStorage.getItem('vault_users_db') || '{}');
+                if (users[activeKey]) {
+                    currentUser = { username: users[activeKey].originalName || activeKey, ...users[activeKey] };
+                    document.getElementById('authModal').classList.add('hidden');
+                    document.getElementById('appContainer').classList.remove('hidden');
+                    loadUserData();
+                    return;
+                }
+            }
+            document.getElementById('authModal').classList.remove('hidden');
+        }
+
+        function openLogoutModal() {
+            document.getElementById('logoutConfirmModal').classList.remove('hidden');
+            document.getElementById('logoutConfirmModal').classList.add('flex');
+        }
+
+        function closeLogoutModal() {
+            document.getElementById('logoutConfirmModal').classList.remove('flex');
+            document.getElementById('logoutConfirmModal').classList.add('hidden');
+        }
+
+        function confirmLogout() {
+            localStorage.removeItem('vault_active_session');
+            location.reload();
+        }
+
+        async function loadUserData() {
+            if (!currentUser) return;
+
+            document.getElementById('sidebarUsername').innerText = currentUser.username;
+            document.getElementById('sidebarAvatarInitial').innerText = currentUser.username.charAt(0).toUpperCase();
+            document.getElementById('anonToggle').checked = !!currentUser.isAnonymous;
+            document.getElementById('profilePlaybackMode').value = currentUser.playbackMode || 'next';
+
+            isRepeat = currentUser.playbackMode === 'repeat';
+            document.getElementById('btnRepeat').classList.toggle('text-vault-accent', isRepeat);
+
+            const tracksKey = `vault_tracks_${currentUser.username.toLowerCase()}`;
+            myTracks = JSON.parse(localStorage.getItem(tracksKey) || '[]');
+
+            const favKey = `vault_favs_${currentUser.username.toLowerCase()}`;
+            const favsArray = JSON.parse(localStorage.getItem(favKey) || '[]');
+            favoritesMap.clear();
+            favsArray.forEach(s => favoritesMap.set(s.id, s));
+
+            await applyCustomization();
+            renderTracks();
+            renderFavorites();
+            renderPlaylist();
+            renderLeaderboard();
+            updateBadges();
+            updateListenTimeUI();
+        }
+
+        function saveTracksMeta() {
+            if (!currentUser) return;
+            localStorage.setItem(`vault_tracks_${currentUser.username.toLowerCase()}`, JSON.stringify(myTracks));
+            document.getElementById('trackCountBadge').innerText = myTracks.length;
+        }
+
+        function saveFavoritesMeta() {
+            if (!currentUser) return;
+            localStorage.setItem(`vault_favs_${currentUser.username.toLowerCase()}`, JSON.stringify(Array.from(favoritesMap.values())));
+        }
+
+        function saveUserCloud() {
+            if (!currentUser) return;
+            let users = JSON.parse(localStorage.getItem('vault_users_db') || '{}');
+            const key = currentUser.username.toLowerCase();
+            if (users[key]) {
+                users[key].listeningSeconds = currentUser.listeningSeconds || 0;
+                users[key].isAnonymous = currentUser.isAnonymous || false;
+                users[key].playbackMode = currentUser.playbackMode || 'next';
+                localStorage.setItem('vault_users_db', JSON.stringify(users));
+            }
+        }
+
+        function updatePlaybackMode(val) {
+            currentUser.playbackMode = val;
+            isRepeat = (val === 'repeat');
+            document.getElementById('btnRepeat').classList.toggle('text-vault-accent', isRepeat);
+            saveUserCloud();
+            showToast(isRepeat ? "По умолчанию: Повтор трека" : "По умолчанию: Переход к следующему");
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.className = "nav-btn w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium text-vault-muted hover:text-white hover:bg-vault-hover";
+            });
+            document.getElementById(`nav-${tabId}`).className = "nav-btn w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-semibold bg-vault-accent/10 text-vault-accent border border-vault-accent/20";
+
+            document.querySelectorAll('.mob-nav-btn').forEach(btn => {
+                btn.className = "mob-nav-btn flex flex-col items-center justify-center flex-1 py-1 text-vault-muted";
+            });
+            document.getElementById(`mob-nav-${tabId}`).className = "mob-nav-btn flex flex-col items-center justify-center flex-1 py-1 text-vault-accent";
+
+            const titles = {
+                'search': ["Загрузка & Поиск Треков", "Ваша изолированная музыкальная база"],
+                'favorites': ["Избранное", "Понравившиеся вам композиции"],
+                'playlist': ["Плейлист", "Очередь воспроизведения"],
+                'leaderboard': ["Таблица Слушателей", "Рейтинг участников платформы"]
+            };
+            document.getElementById('headerTitle').innerText = titles[tabId][0];
+            document.getElementById('headerSubtitle').innerText = titles[tabId][1];
+
+            if (tabId === 'leaderboard') renderLeaderboard();
+        }
+
+        // UPLOAD ENGINE (FILE & DIRECT URL VALIDATED)
+        function openUploadModal() { document.getElementById('uploadModal').classList.remove('hidden'); }
+        function closeUploadModal() { document.getElementById('uploadModal').classList.add('hidden'); }
+
+        function setUploadSourceType(type) {
+            uploadSourceType = type;
+            document.getElementById('uploadTabFile').className = type === 'file' ? 'flex-1 py-2 rounded-lg text-xs font-semibold bg-vault-accent text-zinc-950' : 'flex-1 py-2 rounded-lg text-xs font-semibold text-vault-muted hover:text-white';
+            document.getElementById('uploadTabUrl').className = type === 'url' ? 'flex-1 py-2 rounded-lg text-xs font-semibold bg-vault-accent text-zinc-950' : 'flex-1 py-2 rounded-lg text-xs font-semibold text-vault-muted hover:text-white';
+            
+            document.getElementById('uploadSourceFileInput').classList.toggle('hidden', type !== 'file');
+            document.getElementById('uploadSourceUrlInput').classList.toggle('hidden', type !== 'url');
+        }
+
+        function isValidAudioUrl(url) {
+            try {
+                const parsed = new URL(url);
+                const path = parsed.pathname.toLowerCase();
+                const validExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'];
+                return validExtensions.some(ext => path.endsWith(ext)) || parsed.protocol === 'http:' || parsed.protocol === 'https:';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function handleUploadSubmit(e) {
+            e.preventDefault();
+            const title = document.getElementById('uploadTitle').value.trim();
+            const artist = document.getElementById('uploadArtist').value.trim();
+            const coverFile = document.getElementById('uploadCoverFile').files[0];
+
+            if (!title || !artist) return;
+
+            const trackId = `track_${currentUser.username.toLowerCase()}_${Date.now()}`;
+
+            if (uploadSourceType === 'file') {
+                const audioFile = document.getElementById('uploadAudioFile').files[0];
+                if (!audioFile) {
+                    showToast("Выберите аудиофайл!");
+                    return;
+                }
+                const validAudioTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/x-m4a'];
+                if (audioFile.type && !validAudioTypes.some(t => audioFile.type.includes(t)) && !audioFile.name.match(/\.(mp3|wav|ogg|m4a|aac)$/i)) {
+                    showToast("Ошибка: Допустимы только аудиофайлы (MP3, WAV, OGG)!");
+                    return;
+                }
+                await storeBlob(trackId, audioFile);
+            } else {
+                const audioUrl = document.getElementById('uploadAudioUrl').value.trim();
+                if (!audioUrl || !isValidAudioUrl(audioUrl)) {
+                    showToast("Ошибка: Введите корректную прямую ссылку на аудиофайл (MP3/WAV)!");
+                    return;
+                }
+                // Store URL String as blob text marker
+                const urlBlob = new Blob([audioUrl], { type: 'text/plain' });
+                await storeBlob(trackId, urlBlob);
+            }
+
+            let coverKey = null;
+            if (coverFile) {
+                coverKey = `cover_${trackId}`;
+                await storeBlob(coverKey, coverFile);
+            }
+
+            const newSong = { id: trackId, title, artist, coverKey, isExternalUrl: (uploadSourceType === 'url') };
+            myTracks.unshift(newSong);
+            saveTracksMeta();
+            renderTracks();
+            closeUploadModal();
+            showToast("Трек успешно добавлен!");
+
+            document.getElementById('uploadAudioFile').value = '';
+            document.getElementById('uploadAudioUrl').value = '';
+            document.getElementById('uploadTitle').value = '';
+            document.getElementById('uploadArtist').value = '';
+            document.getElementById('uploadCoverFile').value = '';
+        }
+
+        async function resolveCover(coverKey) {
+            if (!coverKey) return null;
+            const blob = await getBlob(coverKey);
+            return blob ? URL.createObjectURL(blob) : null;
+        }
+
+        async function renderTracks(query = '') {
+            const grid = document.getElementById('tracksGrid');
+            const empty = document.getElementById('emptyTracks');
+            document.getElementById('trackCountBadge').innerText = myTracks.length;
+
+            const filtered = myTracks.filter(s => s.title.toLowerCase().includes(query.toLowerCase()) || s.artist.toLowerCase().includes(query.toLowerCase()));
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                empty.classList.remove('hidden');
+                empty.classList.add('flex');
+                return;
+            }
+
+            empty.classList.add('hidden');
+            empty.classList.remove('flex');
+
+            let html = '';
+            for (let song of filtered) {
+                const isFav = favoritesMap.has(song.id);
+                const isCurrent = currentTrack && currentTrack.id === song.id;
+                const coverUrl = await resolveCover(song.coverKey) || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'1\' height=\'1\'%3E%3Crect width=\'100%25\' height=\'100%25\' fill=\'%2318181C\'/%3E%3C/svg%3E';
+
+                html += `
+                    <div class="glass-card rounded-2xl p-3.5 border transition-all flex items-center gap-3.5 group relative">
+                        <div class="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden ring-1 ring-vault-border shadow-md">
+                            <img src="${coverUrl}" class="w-full h-full object-cover">
+                            <button onclick="playTrack('${song.id}')" class="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-vault-accent text-xl">
+                                <i class="fa-solid ${isCurrent && isPlaying ? 'fa-pause' : 'fa-play'}"></i>
+                            </button>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2">
+                                <h4 class="text-sm font-bold text-white truncate mb-0.5">${song.title}</h4>
+                                ${isCurrent && isPlaying ? `
+                                    <div class="flex items-end gap-0.5 h-4 mb-1">
+                                        <div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <p class="text-xs text-vault-muted truncate mb-1">${song.artist}</p>
+                            <span class="inline-block px-2 py-0.5 rounded-md bg-amber-500/10 text-[10px] font-semibold text-vault-accent border border-amber-500/20">${song.isExternalUrl ? 'AUDIO URL' : 'FULL MP3'}</span>
+                        </div>
+                        <div class="flex flex-col items-center justify-between h-full py-1 gap-1.5">
+                            <button onclick="toggleFavorite('${song.id}')" class="text-vault-muted hover:text-vault-accent transition-colors p-1">
+                                <i class="${isFav ? 'fa-solid fa-heart text-vault-accent' : 'fa-regular fa-heart'} text-base"></i>
+                            </button>
+                            <button onclick="addToPlaylist('${song.id}')" class="text-vault-muted hover:text-white transition-colors p-1" title="В плейлист">
+                                <i class="fa-solid fa-plus text-xs"></i>
+                            </button>
+                            <button onclick="deleteTrack('${song.id}')" class="text-vault-muted hover:text-rose-400 transition-colors p-1" title="Удалить">
+                                <i class="fa-solid fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+            grid.innerHTML = html;
+        }
+
+        function filterTracks() {
+            renderTracks(document.getElementById('trackSearchInput').value);
+        }
+
+        // PLAYBACK ENGINE
+        async function playTrack(id) {
+            let song = myTracks.find(s => s.id === id) || favoritesMap.get(id) || playlistQueue.find(s => s.id === id);
+            if (!song) return;
+
+            const blob = await getBlob(song.id);
+            if (!blob) {
+                showToast("Аудиоисточник не найден!");
+                return;
+            }
+
+            currentTrack = song;
+
+            if (song.isExternalUrl) {
+                const textUrl = await blob.text();
+                audioEl.src = textUrl;
+            } else {
+                audioEl.src = URL.createObjectURL(blob);
+            }
+
+            audioEl.play().then(() => {
+                isPlaying = true;
+                updatePlayerUI(song);
+                startListeningTimer();
+            }).catch(e => {
+                showToast("Ошибка воспроизведения формата/ссылки!");
+                console.error(e);
+            });
+        }
+
+        function setupAudioEvents() {
+            audioEl.ontimeupdate = () => {
+                if (!audioEl.duration) return;
+                const pct = (audioEl.currentTime / audioEl.duration) * 100;
+                document.getElementById('progressBarFill').style.width = `${pct}%`;
+                document.getElementById('currentTimeLabel').innerText = formatTime(audioEl.currentTime);
+                document.getElementById('durationLabel').innerText = formatTime(audioEl.duration);
+            };
+
+            audioEl.onended = () => {
+                if (isRepeat) {
+                    audioEl.currentTime = 0;
+                    audioEl.play();
+                } else {
+                    nextTrack();
+                }
+            };
+        }
+
+        function startListeningTimer() {
+            if (listeningTimer) clearInterval(listeningTimer);
+            listeningTimer = setInterval(() => {
+                if (currentUser && !audioEl.paused) {
+                    currentUser.listeningSeconds = (currentUser.listeningSeconds || 0) + 1;
+                    saveUserCloud();
+                    updateListenTimeUI();
+                }
+            }, 1000);
+        }
+
+        function updateListenTimeUI() {
+            const mins = Math.floor((currentUser.listeningSeconds || 0) / 60);
+            document.getElementById('sidebarListenTime').innerText = `${mins} мин. прослушано`;
+        }
+
+        async function updatePlayerUI(song) {
+            document.getElementById('playerTitle').innerText = song.title;
+            document.getElementById('playerArtist').innerText = song.artist;
+            document.getElementById('playerCover').src = await resolveCover(song.coverKey) || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'1\' height=\'1\'%3E%3Crect width=\'100%25\' height=\'100%25\' fill=\'%2318181C\'/%3E%3C/svg%3E';
+            document.getElementById('playPauseIcon').className = "fa-solid fa-pause";
+
+            const isFav = favoritesMap.has(song.id);
+            document.getElementById('playerLikeBtn').innerHTML = `<i class="${isFav ? 'fa-solid fa-heart text-vault-accent' : 'fa-regular fa-heart'} text-lg"></i>`;
+            renderTracks();
+            renderFavorites();
+            renderPlaylist();
+        }
+
+        function togglePlayPause() {
+            if (!currentTrack) {
+                if (myTracks.length > 0) playTrack(myTracks[0].id);
+                return;
+            }
+            if (isPlaying) {
+                audioEl.pause();
+                isPlaying = false;
+                document.getElementById('playPauseIcon').className = "fa-solid fa-play ml-0.5";
+            } else {
+                audioEl.play();
+                isPlaying = true;
+                document.getElementById('playPauseIcon').className = "fa-solid fa-pause";
+                startListeningTimer();
+            }
+            renderTracks();
+        }
+
+        function nextTrack() {
+            let list = playlistQueue.length > 0 ? playlistQueue : myTracks;
+            if (list.length === 0) return;
+            let idx = list.findIndex(s => s.id === currentTrack.id);
+            if (isShuffle) {
+                idx = Math.floor(Math.random() * list.length);
+            } else {
+                idx = (idx + 1) % list.length;
+            }
+            playTrack(list[idx].id);
+        }
+
+        function prevTrack() {
+            let list = playlistQueue.length > 0 ? playlistQueue : myTracks;
+            if (list.length === 0) return;
+            let idx = list.findIndex(s => s.id === currentTrack.id);
+            idx = (idx - 1 + list.length) % list.length;
+            playTrack(list[idx].id);
+        }
+
+        function seekAudio(e) {
+            if (!audioEl.duration) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * audioEl.duration;
+        }
+
+        function changeVolume(val) {
+            audioEl.volume = val;
+            isMuted = val == 0;
+            updateMuteBtn();
+        }
+
+        function toggleMute() {
+            isMuted = !isMuted;
+            audioEl.muted = isMuted;
+            updateMuteBtn();
+        }
+
+        function updateMuteBtn() {
+            const btn = document.getElementById('muteBtn');
+            btn.innerHTML = isMuted ? `<i class="fa-solid fa-volume-xmark text-rose-400"></i>` : `<i class="fa-solid fa-volume-high"></i>`;
+        }
+
+        function toggleRepeat() {
+            isRepeat = !isRepeat;
+            document.getElementById('btnRepeat').classList.toggle('text-vault-accent', isRepeat);
+            showToast(isRepeat ? "Повтор включен" : "Повтор выключен");
+        }
+
+        function toggleShuffle() {
+            isShuffle = !isShuffle;
+            document.getElementById('btnShuffle').classList.toggle('text-vault-accent', isShuffle);
+            showToast(isShuffle ? "Случайный порядок включен" : "Случайный порядок выключен");
+        }
+
+        // FAVORITES & PLAYLIST
+        function toggleFavorite(id) {
+            let song = myTracks.find(s => s.id === id) || favoritesMap.get(id) || playlistQueue.find(s => s.id === id);
+            if (!song) return;
+
+            if (favoritesMap.has(id)) {
+                favoritesMap.delete(id);
+                showToast("Удалено из избранного");
+            } else {
+                favoritesMap.set(id, song);
+                showToast("Добавлено в избранное");
+            }
+            saveFavoritesMeta();
+            updateBadges();
+            renderTracks();
+            renderFavorites();
+            if (currentTrack && currentTrack.id === id) updatePlayerUI(currentTrack);
+        }
+
+        function toggleCurrentFavorite() {
+            if (currentTrack) toggleFavorite(currentTrack.id);
+        }
+
+        function addToPlaylist(id) {
+            let song = myTracks.find(s => s.id === id) || favoritesMap.get(id);
+            if (!song) return;
+            playlistQueue.push(song);
+            updateBadges();
+            renderPlaylist();
+            showToast("Добавлено в плейлист");
+        }
+
+        function clearPlaylist() {
+            playlistQueue = [];
+            updateBadges();
+            renderPlaylist();
+        }
+
+        function playAllFavorites() {
+            const favs = Array.from(favoritesMap.values());
+            if (favs.length > 0) {
+                playlistQueue = [...favs];
+                playTrack(playlistQueue[0].id);
+                switchTab('playlist');
+            }
+        }
+
+        async function renderFavorites() {
+            const grid = document.getElementById('favoritesGrid');
+            const empty = document.getElementById('emptyFavorites');
+            const favs = Array.from(favoritesMap.values());
+
+            if (favs.length === 0) {
+                grid.innerHTML = '';
+                empty.classList.remove('hidden');
+                empty.classList.add('flex');
+                return;
+            }
+            empty.classList.add('hidden');
+            empty.classList.remove('flex');
+
+            let html = '';
+            for (let song of favs) {
+                const coverUrl = await resolveCover(song.coverKey) || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'1\' height=\'1\'%3E%3Crect width=\'100%25\' height=\'100%25\' fill=\'%2318181C\'/%3E%3C/svg%3E';
+                html += `
+                    <div class="glass-card rounded-2xl p-3.5 border transition-all flex items-center gap-3.5 group">
+                        <div class="relative shrink-0 w-14 h-14 rounded-xl overflow-hidden ring-1 ring-vault-border">
+                            <img src="${coverUrl}" class="w-full h-full object-cover">
+                            <button onclick="playTrack('${song.id}')" class="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-vault-accent text-base">
+                                <i class="fa-solid fa-play"></i>
+                            </button>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <h4 class="text-sm font-bold text-white truncate">${song.title}</h4>
+                            <p class="text-xs text-vault-muted truncate">${song.artist}</p>
+                        </div>
+                        <button onclick="toggleFavorite('${song.id}')" class="text-vault-accent p-2">
+                            <i class="fa-solid fa-heart text-base"></i>
+                        </button>
+                    </div>
+                `;
+            }
+            grid.innerHTML = html;
+        }
+
+        async function renderPlaylist() {
+            const container = document.getElementById('playlistList');
+            const empty = document.getElementById('emptyPlaylist');
+
+            if (playlistQueue.length === 0) {
+                container.innerHTML = '';
+                empty.classList.remove('hidden');
+                empty.classList.add('flex');
+                return;
+            }
+            empty.classList.add('hidden');
+            empty.classList.remove('flex');
+
+            let html = '';
+            for (let i = 0; i < playlistQueue.length; i++) {
+                const song = playlistQueue[i];
+                const isCurrent = currentTrack && currentTrack.id === song.id;
+                const coverUrl = await resolveCover(song.coverKey) || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'1\' height=\'1\'%3E%3Crect width=\'100%25\' height=\'100%25\' fill=\'%2318181C\'/%3E%3C/svg%3E';
+                html += `
+                    <div class="glass-card rounded-2xl p-3 border flex items-center gap-3.5">
+                        <span class="text-xs font-mono text-vault-muted w-5 text-center">${i + 1}</span>
+                        <div class="relative shrink-0 w-12 h-12 rounded-lg overflow-hidden ring-1 ring-vault-border">
+                            <img src="${coverUrl}" class="w-full h-full object-cover">
+                            <button onclick="playTrack('${song.id}')" class="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity text-vault-accent text-sm">
+                                <i class="fa-solid fa-play"></i>
+                            </button>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <h4 class="text-sm font-bold ${isCurrent ? 'text-vault-accent' : 'text-white'} truncate">${song.title}</h4>
+                            <p class="text-xs text-vault-muted truncate">${song.artist}</p>
+                        </div>
+                        <button onclick="playlistQueue.splice(${i},1); renderPlaylist(); updateBadges();" class="text-vault-muted hover:text-rose-400 p-2">
+                            <i class="fa-solid fa-xmark text-sm"></i>
+                        </button>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        function updateBadges() {
+            document.getElementById('favCountBadge').innerText = favoritesMap.size;
+            document.getElementById('playlistCountBadge').innerText = playlistQueue.length;
+        }
+
+        // LEADERBOARD & STEAM PROFILE
+        async function renderLeaderboard() {
+            const users = JSON.parse(localStorage.getItem('vault_users_db') || '{}');
+            const list = Object.keys(users)
+                .map(key => ({ username: users[key].originalName || key, key: key, ...users[key] }))
+                .filter(u => !u.isAnonymous)
+                .sort((a, b) => (b.listeningSeconds || 0) - (a.listeningSeconds || 0));
+
+            const container = document.getElementById('leaderboardList');
+            let html = '';
+
+            for (let i = 0; i < list.length; i++) {
+                const u = list[i];
+                const mins = Math.floor((u.listeningSeconds || 0) / 60);
+                const avatarBlob = await getBlob(`avatar_${u.key}`);
+                const avatarUrl = avatarBlob ? URL.createObjectURL(avatarBlob) : null;
+
+                html += `
+                    <div onclick="openSteamModal('${u.key}')" class="glass-card p-4 rounded-2xl border flex items-center justify-between cursor-pointer hover:border-vault-accent/40">
+                        <div class="flex items-center gap-3.5">
+                            <span class="font-extrabold text-sm text-vault-accent w-6 text-center">#${i + 1}</span>
+                            <div class="w-10 h-10 rounded-full overflow-hidden bg-vault-hover ring-1 ring-vault-border flex items-center justify-center font-bold text-vault-accent">
+                                ${avatarUrl ? `<img src="${avatarUrl}" class="w-full h-full object-cover">` : u.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-bold text-white">${u.username}</h4>
+                                <p class="text-xs text-vault-muted">Слушатель</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-sm font-extrabold text-vault-accent">${mins} мин</span>
+                            <span class="block text-[10px] font-semibold text-vault-muted uppercase">в музыке</span>
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        async function openSteamModal(userKey) {
+            const users = JSON.parse(localStorage.getItem('vault_users_db') || '{}');
+            const u = users[userKey];
+            if (!u) return;
+
+            const name = u.originalName || userKey;
+            const tracks = JSON.parse(localStorage.getItem(`vault_tracks_${userKey}`) || '[]');
+            document.getElementById('steamUsername').innerText = name;
+            document.getElementById('steamTrackCount').innerText = tracks.length;
+            document.getElementById('steamListenedTime').innerText = `${Math.floor((u.listeningSeconds || 0) / 60)} мин`;
+            document.getElementById('steamAvatarInitial').innerText = name.charAt(0).toUpperCase();
+
+            const img = document.getElementById('steamAvatarImg');
+            const vid = document.getElementById('steamAvatarVid');
+            const blob = await getBlob(`avatar_${userKey}`);
+
+            img.classList.add('hidden');
+            vid.classList.add('hidden');
+
+            if (blob) {
+                const url = URL.createObjectURL(blob);
+                if (blob.type.startsWith('video')) {
+                    vid.src = url;
+                    vid.classList.remove('hidden');
+                } else {
+                    img.src = url;
+                    img.classList.remove('hidden');
+                }
+            }
+
+            document.getElementById('steamModal').classList.remove('hidden');
+            document.getElementById('steamModal').classList.add('flex');
+        }
+
+        function closeSteamModal() {
+            document.getElementById('steamModal').classList.remove('flex');
+            document.getElementById('steamModal').classList.add('hidden');
+        }
+
+        // CUSTOMIZATION & GALLERY MEDIA
+        function openProfileModal() { document.getElementById('profileModal').classList.remove('hidden'); document.getElementById('profileModal').classList.add('flex'); }
+        function closeProfileModal() { document.getElementById('profileModal').classList.remove('flex'); document.getElementById('profileModal').classList.add('hidden'); }
+
+        function toggleAnonymousMode(val) {
+            currentUser.isAnonymous = val;
+            saveUserCloud();
+            renderLeaderboard();
+        }
+
+        async function saveProfileCustomization() {
+            if (!currentUser) return;
+            const avatarFile = document.getElementById('profileAvatarInput').files[0];
+            const bgFile = document.getElementById('profileBgInput').files[0];
+            const key = currentUser.username.toLowerCase();
+
+            if (avatarFile) await storeBlob(`avatar_${key}`, avatarFile);
+            if (bgFile) await storeBlob(`bg_${key}`, bgFile);
+
+            await applyCustomization();
+            closeProfileModal();
+            showToast("Настройки обновлены!");
+        }
+
+        async function resetBackground() {
+            if (!currentUser) return;
+            await deleteBlob(`bg_${currentUser.username.toLowerCase()}`);
+            await applyCustomization();
+            showToast("Фон сброшен");
+        }
+
+        async function applyCustomization() {
+            if (!currentUser) return;
+
+            const key = currentUser.username.toLowerCase();
+
+            const img = document.getElementById('sidebarAvatarImg');
+            const vid = document.getElementById('sidebarAvatarVid');
+            const init = document.getElementById('sidebarAvatarInitial');
+            const avatarBlob = await getBlob(`avatar_${key}`);
+
+            img.classList.add('hidden');
+            vid.classList.add('hidden');
+            init.classList.remove('hidden');
+
+            if (avatarBlob) {
+                init.classList.add('hidden');
+                const url = URL.createObjectURL(avatarBlob);
+                if (avatarBlob.type.startsWith('video')) {
+                    vid.src = url;
+                    vid.classList.remove('hidden');
+                } else {
+                    img.src = url;
+                    img.classList.remove('hidden');
+                }
+            }
+
+            const bgLayer = document.getElementById('bgLayer');
+            bgLayer.innerHTML = '';
+            const bgBlob = await getBlob(`bg_${key}`);
+            if (bgBlob) {
+                const url = URL.createObjectURL(bgBlob);
+                if (bgBlob.type.startsWith('video')) {
+                    bgLayer.innerHTML = `<video src="${url}" autoplay loop muted playsinline></video>`;
+                } else {
+                    bgLayer.innerHTML = `<img src="${url}">`;
+                }
+            }
+        }
+
+        async function deleteTrack(id) {
+            myTracks = myTracks.filter(s => s.id !== id);
+            favoritesMap.delete(id);
+            playlistQueue = playlistQueue.filter(s => s.id !== id);
+            await deleteBlob(id);
+            await deleteBlob(`cover_${id}`);
+            saveTracksMeta();
+            saveFavoritesMeta();
+            updateBadges();
+            renderTracks();
+            renderFavorites();
+            renderPlaylist();
+            showToast("Трек удален");
+        }
+
+        function formatTime(sec) {
+            if (isNaN(sec)) return "0:00";
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return `${m}:${s < 10 ? '0' : ''}${s}`;
+        }
+
+        function showToast(msg) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = "glass px-4 py-3 rounded-2xl border border-vault-border text-xs font-semibold text-white shadow-2xl flex items-center gap-2.5 tab-fade";
+            toast.innerHTML = `<i class="fa-solid fa-circle-check text-vault-accent text-sm"></i><span>${msg}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
